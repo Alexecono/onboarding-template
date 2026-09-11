@@ -91,12 +91,12 @@ void apply_stencil(const Grid& old_grid, Grid& new_grid){
 }
 
 Grid::Grid(std::size_t rows, std::size_t cols)
-    : rows_(rows), cols_(cols), temps_(rows * cols, 0.0), interior_rows_(rows - 2) {
+    : rows_(rows), cols_(cols), temps_(rows * cols, 0.0), interior_rows_(rows > 2 ? rows - 2 : 0) {
 
       num_threads_ = std::min(static_cast<std::size_t>(std::thread::hardware_concurrency()), interior_rows_);
       if (num_threads_ == 0)
         num_threads_ = 1;
-      num_threads_ = 4;
+      //num_threads_ = 10;
 
       base_interval_ = interior_rows_ / num_threads_;
       extra = interior_rows_ % num_threads_;
