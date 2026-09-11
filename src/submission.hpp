@@ -96,7 +96,7 @@ Grid::Grid(std::size_t rows, std::size_t cols)
       num_threads_ = std::min(static_cast<std::size_t>(std::thread::hardware_concurrency()), interior_rows_);
       if (num_threads_ == 0)
         num_threads_ = 1;
-      num_threads_ = 3;
+      num_threads_ = 2;
 
       base_interval_ = interior_rows_ / num_threads_;
       extra = interior_rows_ % num_threads_;
