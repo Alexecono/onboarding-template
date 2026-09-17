@@ -25,6 +25,8 @@ std::size_t interior_rows_;
 std::size_t base_interval_;
 std::size_t extra;
 
+bool first_iteration_ = true;
+
 // Represent 2D values as a flat 1D vector
 std::vector<double> temps_;
 
@@ -41,6 +43,8 @@ public:
   std::size_t get_cols() const { return cols_; }
   std::size_t get_interior_rows() const { return interior_rows_; }
 
+  bool first_iteration() const { return first_iteration_; }
+  void set_first_iteration_false() { first_iteration_ = false; }
 
   std::size_t get_start_row(std::size_t worker_id) const {
     return intervals_[worker_id].start_row;
@@ -227,7 +231,7 @@ void update_grid(
 // values unchanged from old_grid to new_grid. Implement your solution here.
 void apply_stencil(const Grid& old_grid, Grid& new_grid){
 
-  //if (new_grid.get_iterations() == 0) {
+  if (new_grid.first_iteration()) {
     // Top and bottom rows
     for (std::size_t j = 0; j < old_grid.get_cols(); ++j) {
     new_grid(0, j) = old_grid(0, j);
@@ -241,7 +245,9 @@ void apply_stencil(const Grid& old_grid, Grid& new_grid){
       new_grid(i, old_grid.get_cols() - 1) =
         old_grid(i, old_grid.get_cols() - 1);
     }
- // }
+
+  }
+  new_grid.set_first_iteration_false();
 
   if (should_thread(old_grid.get_interior_rows())) {
     static ThreadPool thread_pool(get_num_threads(old_grid.get_interior_rows()));
