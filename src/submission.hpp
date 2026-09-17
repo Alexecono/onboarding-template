@@ -1,5 +1,7 @@
 #pragma once
 
+#include <iostream>
+
 #include <cstddef>
 #include <vector>
 #include <thread>
@@ -7,17 +9,11 @@
 #include <mutex>
 #include <condition_variable>
 
-struct Worker {
+struct Worker_Intervals {
   std::size_t start_row;
   std::size_t end_row;
-  std::thread thread;
 };
 
-// Starter Grid for the 2D heat-diffusion problem.
-//
-// The evaluation harness uses operator() to set initial conditions and to read
-// results; it never touches your internal storage. Keep this interface,
-// everything else is yours.
 class Grid {
 private:
 
@@ -32,53 +28,117 @@ std::size_t extra;
 // Represent 2D values as a flat 1D vector
 std::vector<double> temps_;
 
-std::vector<Worker> workers_;
-
-std::mutex mutex_;
-std::condition_variable wake_cv_;
-std::condition_variable done_cv_;
-
-const Grid* old_grid_ = nullptr;
-Grid* new_grid_ = nullptr;
-
-std::size_t iteration_ = 0;
-std::size_t finished_workers_ = 0;
-bool stop_ = false;
+std::vector<Worker_Intervals> intervals_;
 
 
 public:
   Grid(std::size_t rows, std::size_t cols);
-  ~Grid();
 
   double& operator()(std::size_t i, std::size_t j);
   double  operator()(std::size_t i, std::size_t j) const;
 
   std::size_t get_rows() const { return rows_; }
   std::size_t get_cols() const { return cols_; }
-  std::size_t get_iterations() const { return iteration_; }
+  std::size_t get_interior_rows() const { return interior_rows_; }
 
-  void activate_worker(std::size_t start_row, std::size_t end_row);
-  void start_iteration(const Grid& old_grid);
-  void wait_for_workers();
 
-}; 
-
-int additional_row(std::size_t& extra_rows) {
-  if (extra_rows > 0) {
-    extra_rows--;
-    return 1;
+  std::size_t get_start_row(std::size_t worker_id) const {
+    return intervals_[worker_id].start_row;
   }
-  return 0;
+  std::size_t get_end_rows(std::size_t worker_id) const {
+    return intervals_[worker_id].end_row;
+  }
+
+};
+
+void update_grid(std::size_t start_row, std::size_t end_row, const Grid& old_grid, Grid& new_grid) {
+  for (std::size_t i = start_row; i < end_row; ++i) {
+        for (std::size_t j = 1; j < old_grid.get_cols() - 1; ++j) {
+
+            new_grid(i, j) =
+                0.5 * old_grid(i, j) +
+                0.125 * (
+                    old_grid(i - 1, j) +
+                    old_grid(i + 1, j) +
+                    old_grid(i, j - 1) +
+                    old_grid(i, j + 1)
+                );
+        }
+    }
 }
 
-void update_grid(
-    std::size_t start_row,
-    std::size_t end_row,
-    const Grid& old_grid,
-    Grid& new_grid
-);
+class ThreadPool {
+  private:
+    std::vector<std::thread> workers_;
 
-void Grid::activate_worker(std::size_t start_row, std::size_t end_row) {
+    std::mutex mutex_;
+    std::condition_variable wake_cv_;
+    std::condition_variable done_cv_;
+
+    bool stop_ = false;
+
+    std::size_t iteration_ = 0;
+    std::size_t finished_workers_ = 0;
+    std::size_t num_threads_ = 0;
+
+    const Grid* old_grid_ = nullptr;
+    Grid* new_grid_ = nullptr;
+
+  public:
+    ThreadPool(std::size_t num_threads);
+    ~ThreadPool();
+    void activate_worker(std::size_t worker_id);
+    void start_iteration(const Grid& old_grid, Grid& new_grid);
+    void wait_for_workers();
+
+
+};
+
+std::size_t get_num_threads(std::size_t interior_rows) {
+  return 4; //hardcoded for now 
+  return std::max(
+        std::size_t{1},
+        std::min(
+            static_cast<std::size_t>(std::thread::hardware_concurrency()),
+            interior_rows
+        )
+    );
+}
+
+bool should_thread(std::size_t interior_rows) {
+    return interior_rows > 100; // simple decision for now
+}
+
+ThreadPool::ThreadPool(std::size_t num_threads) : num_threads_(num_threads) {
+  workers_.resize(num_threads_);
+
+  for (std::size_t t = 0; t < num_threads_; t++) {
+    workers_[t] = std::thread(
+        &ThreadPool::activate_worker,
+        this,
+        t
+    );
+  }
+}
+
+ThreadPool::~ThreadPool() {
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    stop_ = true;
+  } // Unlocks
+
+  // Wake workers that are sleeping on cv_
+  wake_cv_.notify_all();
+
+  // Wait for every thread to terminate
+  for (auto& worker : workers_) {
+    if (worker.joinable()) {
+      worker.join();
+    }
+  }
+}
+
+void ThreadPool::activate_worker(std::size_t worker_id) {
   std::size_t my_iteration = 0;
 
   while (true) {
@@ -112,7 +172,7 @@ void Grid::activate_worker(std::size_t start_row, std::size_t end_row) {
 
     lock.unlock();
 
-    update_grid(start_row, end_row, *old, *next);
+    update_grid(old->get_start_row(worker_id), old->get_end_rows(worker_id), *old, *next);
 
     lock.lock();
     finished_workers_++;
@@ -121,20 +181,20 @@ void Grid::activate_worker(std::size_t start_row, std::size_t end_row) {
   }
 }
 
-void Grid::start_iteration(const Grid& old_grid) {
+void ThreadPool::start_iteration(const Grid& old_grid, Grid& new_grid) {
   {
     std::lock_guard<std::mutex> lock(mutex_);
     old_grid_ = &old_grid;
-    new_grid_ = this;
+    new_grid_ = &new_grid;
     finished_workers_ = 0;
     iteration_++;
-  }
+  } // Unlocks
 
   // Wake all persistent workers
   wake_cv_.notify_all();
 }
 
-void Grid::wait_for_workers() {
+void ThreadPool::wait_for_workers(){
   std::unique_lock<std::mutex> lock(mutex_);
 
   done_cv_.wait(lock, [&] {
@@ -142,27 +202,32 @@ void Grid::wait_for_workers() {
   });
 }
 
-void update_grid(std::size_t start_row, std::size_t end_row, const Grid& old_grid, Grid& new_grid) {
-  for (std::size_t i = start_row; i < end_row; ++i) {
-        for (std::size_t j = 1; j < old_grid.get_cols() - 1; ++j) {
+// Starter Grid for the 2D heat-diffusion problem.
+//
+// The evaluation harness uses operator() to set initial conditions and to read
+// results; it never touches your internal storage. Keep this interface,
+// everything else is yours.
 
-            new_grid(i, j) =
-                0.5 * old_grid(i, j) +
-                0.125 * (
-                    old_grid(i - 1, j) +
-                    old_grid(i + 1, j) +
-                    old_grid(i, j - 1) +
-                    old_grid(i, j + 1)
-                );
-        }
-    }
+int additional_row(std::size_t& extra_rows) {
+  if (extra_rows > 0) {
+    extra_rows--;
+    return 1;
+  }
+  return 0;
 }
+
+void update_grid(
+    std::size_t start_row,
+    std::size_t end_row,
+    const Grid& old_grid,
+    Grid& new_grid
+);
 
 // Apply the five-point stencil over all interior points, copying the boundary
 // values unchanged from old_grid to new_grid. Implement your solution here.
 void apply_stencil(const Grid& old_grid, Grid& new_grid){
 
-  if (new_grid.get_iterations() == 0) {
+  //if (new_grid.get_iterations() == 0) {
     // Top and bottom rows
     for (std::size_t j = 0; j < old_grid.get_cols(); ++j) {
     new_grid(0, j) = old_grid(0, j);
@@ -176,64 +241,43 @@ void apply_stencil(const Grid& old_grid, Grid& new_grid){
       new_grid(i, old_grid.get_cols() - 1) =
         old_grid(i, old_grid.get_cols() - 1);
     }
-  }
+ // }
+
+  if (should_thread(old_grid.get_interior_rows())) {
+    static ThreadPool thread_pool(get_num_threads(old_grid.get_interior_rows()));
    
-  new_grid.start_iteration(old_grid);
-  new_grid.wait_for_workers();
+    thread_pool.start_iteration(old_grid, new_grid);
+    thread_pool.wait_for_workers();
+  } else {
+    //std::cout << "No threading" << std::endl;
+    update_grid(1, old_grid.get_rows() - 1, old_grid, new_grid);
+  }
+
 }
 
 Grid::Grid(std::size_t rows, std::size_t cols)
     : rows_(rows), cols_(cols), temps_(rows * cols, 0.0), interior_rows_(rows > 2 ? rows - 2 : 0) {
 
-      num_threads_ = std::min(static_cast<std::size_t>(std::thread::hardware_concurrency()), interior_rows_);
-      if (num_threads_ == 0)
-        num_threads_ = 1;
-      num_threads_ = 16;
+      num_threads_ = get_num_threads(interior_rows_);
 
       base_interval_ = interior_rows_ / num_threads_;
       extra = interior_rows_ % num_threads_;
 
-      workers_.resize(num_threads_);
+      intervals_.resize(num_threads_);
 
       std::size_t current_row = 1;
 
       for (std::size_t t = 0; t < num_threads_; ++t) {
 
         std::size_t rows_for_thread = base_interval_ + additional_row(extra);
-        workers_[t].start_row = current_row;
-        workers_[t].end_row = workers_[t].start_row + rows_for_thread;
+        intervals_[t].start_row = current_row;
+        intervals_[t].end_row = intervals_[t].start_row + rows_for_thread;
 
-        workers_[t].thread = std::thread(
-            &Grid::activate_worker,
-            this,
-            workers_[t].start_row,
-            workers_[t].end_row
-        );
-
-        current_row = workers_[t].end_row;
+        current_row = intervals_[t].end_row;
 
       }
 
      }
-
-Grid::~Grid() {
-  // Tell every worker to stop
-  {
-    std::lock_guard<std::mutex> lock(mutex_);
-
-    stop_ = true;
-  }
-
-  // Wake workers that are sleeping on cv_
-  wake_cv_.notify_all();
-
-  // Wait for every thread to terminate
-  for (auto& worker : workers_) {
-    if (worker.thread.joinable()) {
-      worker.thread.join();
-    }
-  }
-}
 
 double& Grid::operator()(std::size_t i, std::size_t j) {
   return temps_[i * cols_ + j];
