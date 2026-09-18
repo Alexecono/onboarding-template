@@ -114,7 +114,7 @@ std::size_t get_num_threads(std::size_t interior_rows) {
 }
 
 bool should_thread(std::size_t interior_rows, std::size_t cols) {
-    return interior_rows * (cols - 2) > 150000; // simple decision for now
+    return interior_rows * (cols) > 150000; // simple decision for now
 }
 
 ThreadPool::ThreadPool(std::size_t num_threads) : num_threads_(num_threads) {
