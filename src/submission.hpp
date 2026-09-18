@@ -106,7 +106,7 @@ class ThreadPool {
 };
 
 std::size_t get_num_threads(std::size_t interior_rows) {
-  //return 4; //hardcoded for now 
+  return 3; //hardcoded for now 
   return std::max(
         std::size_t{1},
         std::min(
