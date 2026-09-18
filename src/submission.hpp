@@ -106,18 +106,15 @@ class ThreadPool {
 };
 
 std::size_t get_num_threads(std::size_t interior_rows) {
-  return 4; //hardcoded for now 
+  //return 4; //hardcoded for now 
   return std::max(
         std::size_t{1},
-        std::min(
-            static_cast<std::size_t>(std::thread::hardware_concurrency()),
-            interior_rows
-        )
+        (interior_rows + 63) / 64
     );
 }
 
 bool should_thread(std::size_t interior_rows, std::size_t cols) {
-    return interior_rows * (cols - 2) > 250000; // simple decision for now
+    return interior_rows * (cols - 2) > 150000; // simple decision for now
 }
 
 ThreadPool::ThreadPool(std::size_t num_threads) : num_threads_(num_threads) {
