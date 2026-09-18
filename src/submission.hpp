@@ -14,6 +14,12 @@ struct Worker_Intervals {
   std::size_t end_row;
 };
 
+// Starter Grid for the 2D heat-diffusion problem.
+//
+// The evaluation harness uses operator() to set initial conditions and to read
+// results; it never touches your internal storage. Keep this interface,
+// everything else is yours.
+
 class Grid {
 private:
 
@@ -30,6 +36,7 @@ bool first_iteration_ = true;
 // Represent 2D values as a flat 1D vector
 std::vector<double> temps_;
 
+// Threads can safely read from this simultaneously once set by Grid's constructor with no mutex
 std::vector<Worker_Intervals> intervals_;
 
 
@@ -99,7 +106,7 @@ class ThreadPool {
 };
 
 std::size_t get_num_threads(std::size_t interior_rows) {
-  return 4; //hardcoded for now 
+  //return 4; //hardcoded for now 
   return std::max(
         std::size_t{1},
         std::min(
@@ -205,12 +212,6 @@ void ThreadPool::wait_for_workers(){
     return finished_workers_ == num_threads_;
   });
 }
-
-// Starter Grid for the 2D heat-diffusion problem.
-//
-// The evaluation harness uses operator() to set initial conditions and to read
-// results; it never touches your internal storage. Keep this interface,
-// everything else is yours.
 
 int additional_row(std::size_t& extra_rows) {
   if (extra_rows > 0) {
