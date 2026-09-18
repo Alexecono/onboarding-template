@@ -26,7 +26,7 @@ private:
 std::size_t cols_;
 std::size_t rows_;
 
-std::size_t num_threads_;
+std::size_t active_workers_;
 std::size_t interior_rows_;
 std::size_t base_interval_;
 std::size_t extra;
@@ -49,6 +49,7 @@ public:
   std::size_t get_rows() const { return rows_; }
   std::size_t get_cols() const { return cols_; }
   std::size_t get_interior_rows() const { return interior_rows_; }
+  std::size_t get_active_workers() const { return active_workers_; }
 
   bool first_iteration() const { return first_iteration_; }
   void set_first_iteration_false() { first_iteration_ = false; }
@@ -81,6 +82,7 @@ void update_grid(std::size_t start_row, std::size_t end_row, const Grid& old_gri
 class ThreadPool {
   private:
     std::vector<std::thread> workers_;
+    std::size_t active_workers_ = 0;
 
     std::mutex mutex_;
     std::condition_variable wake_cv_;
@@ -105,15 +107,13 @@ class ThreadPool {
 
 };
 
-std::size_t get_num_threads(std::size_t interior_rows) {
+std::size_t get_active_threads(std::size_t interior_rows) {
   //return 4; //hardcoded for now 
   return std::max(
         std::size_t{1},
         std::min(
-          ((interior_rows + 63) / 64),
-          static_cast<std::size_t>(
-                std::thread::hardware_concurrency())
-        )
+            static_cast<std::size_t>(std::thread::hardware_concurrency()),
+            (interior_rows + 63) / 64)
     );
 }
 
@@ -178,6 +178,10 @@ void ThreadPool::activate_worker(std::size_t worker_id) {
         break;
 
     my_iteration = iteration_;
+    
+    // This worker is not needed for this iteration.
+    if (worker_id >= active_workers_)
+      continue;
 
     const Grid* old = old_grid_;
     Grid* next = new_grid_;
@@ -188,7 +192,7 @@ void ThreadPool::activate_worker(std::size_t worker_id) {
 
     lock.lock();
     finished_workers_++;
-    if (finished_workers_ == num_threads_)
+    if (finished_workers_ == active_workers_)
       done_cv_.notify_one();
   }
 }
@@ -199,6 +203,7 @@ void ThreadPool::start_iteration(const Grid& old_grid, Grid& new_grid) {
     old_grid_ = &old_grid;
     new_grid_ = &new_grid;
     finished_workers_ = 0;
+    active_workers_ = old_grid.get_active_workers();
     iteration_++;
   } // Unlocks
 
@@ -210,7 +215,7 @@ void ThreadPool::wait_for_workers(){
   std::unique_lock<std::mutex> lock(mutex_);
 
   done_cv_.wait(lock, [&] {
-    return finished_workers_ == num_threads_;
+    return finished_workers_ == active_workers_;
   });
 }
 
@@ -252,7 +257,7 @@ void apply_stencil(const Grid& old_grid, Grid& new_grid){
   }
 
   if (should_thread(old_grid.get_interior_rows(), old_grid.get_cols())) {
-    static ThreadPool thread_pool(get_num_threads(old_grid.get_interior_rows()));
+    static ThreadPool thread_pool(std::thread::hardware_concurrency());
    
     thread_pool.start_iteration(old_grid, new_grid);
     thread_pool.wait_for_workers();
@@ -266,16 +271,16 @@ void apply_stencil(const Grid& old_grid, Grid& new_grid){
 Grid::Grid(std::size_t rows, std::size_t cols)
     : rows_(rows), cols_(cols), temps_(rows * cols, 0.0), interior_rows_(rows > 2 ? rows - 2 : 0) {
 
-      num_threads_ = get_num_threads(interior_rows_);
+      active_workers_ = get_active_threads(interior_rows_);
 
-      base_interval_ = interior_rows_ / num_threads_;
-      extra = interior_rows_ % num_threads_;
+      base_interval_ = interior_rows_ / active_workers_;
+      extra = interior_rows_ % active_workers_;
 
-      intervals_.resize(num_threads_);
+      intervals_.resize(active_workers_);
 
       std::size_t current_row = 1;
 
-      for (std::size_t t = 0; t < num_threads_; ++t) {
+      for (std::size_t t = 0; t < active_workers_; ++t) {
 
         std::size_t rows_for_thread = base_interval_ + additional_row(extra);
         intervals_[t].start_row = current_row;
