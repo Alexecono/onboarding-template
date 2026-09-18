@@ -108,7 +108,7 @@ class ThreadPool {
 };
 
 std::size_t get_active_threads(std::size_t interior_rows) {
-  //return 4; //hardcoded for now 
+  return 4; //hardcoded for now 
   return std::max(
         std::size_t{1},
         std::min(
@@ -178,7 +178,7 @@ void ThreadPool::activate_worker(std::size_t worker_id) {
         break;
 
     my_iteration = iteration_;
-    
+
     // This worker is not needed for this iteration.
     if (worker_id >= active_workers_)
       continue;
