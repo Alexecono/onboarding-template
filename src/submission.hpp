@@ -109,7 +109,11 @@ std::size_t get_num_threads(std::size_t interior_rows) {
   //return 4; //hardcoded for now 
   return std::max(
         std::size_t{1},
-        (interior_rows + 63) / 64
+        std::min(
+          ((interior_rows + 63) / 64),
+          static_cast<std::size_t>(
+                std::thread::hardware_concurrency())
+        )
     );
 }
 
