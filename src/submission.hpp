@@ -257,7 +257,7 @@ void apply_stencil(const Grid& old_grid, Grid& new_grid){
   }
 
   if (should_thread(old_grid.get_interior_rows(), old_grid.get_cols())) {
-    static ThreadPool thread_pool(std::thread::hardware_concurrency());
+    static ThreadPool thread_pool(4);
    
     thread_pool.start_iteration(old_grid, new_grid);
     thread_pool.wait_for_workers();
