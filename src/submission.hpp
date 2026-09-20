@@ -1,7 +1,5 @@
 #pragma once
 
-#include <iostream>
-
 #include <cstddef>
 #include <vector>
 #include <thread>
@@ -109,7 +107,7 @@ class ThreadPool {
 };
 
 std::size_t get_active_threads(std::size_t interior_rows) {
-  return 4; //hardcoded for now 
+  return 8; //hardcoded for now 
   return std::max(
         std::size_t{1},
         std::min(
@@ -254,7 +252,7 @@ void apply_stencil(const Grid& old_grid, Grid& new_grid){
   }
 
   if (should_thread(old_grid.get_interior_rows(), old_grid.get_cols())) {
-    static ThreadPool thread_pool(4);
+    static ThreadPool thread_pool(8);
    
     thread_pool.start_iteration(old_grid, new_grid);
     thread_pool.wait_for_workers();
