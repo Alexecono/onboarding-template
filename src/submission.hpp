@@ -7,6 +7,7 @@
 #include <mutex>
 #include <condition_variable>
 #include <atomic>
+#include <omp.h>
 
 struct Worker_Intervals {
   std::size_t start_row;
@@ -64,8 +65,9 @@ public:
 
 void update_grid(std::size_t start_row, std::size_t end_row, const Grid& old_grid, Grid& new_grid) {
   for (std::size_t i = start_row; i < end_row; ++i) {
-        for (std::size_t j = 1; j < old_grid.get_cols() - 1; ++j) {
 
+        #pragma omp simd
+        for (std::size_t j = 1; j < old_grid.get_cols() - 1; ++j) {
             new_grid(i, j) =
                 0.5 * old_grid(i, j) +
                 0.125 * (
