@@ -178,9 +178,9 @@ void ThreadPool::activate_worker(std::size_t worker_id) {
     if (stop_)
         break;
 
-    lock.unlock();
-
     my_iteration = iteration_.load(std::memory_order_acquire);
+    
+    lock.unlock();
 
     // This worker is not needed for this iteration.
     if (worker_id >= active_workers_)
@@ -191,7 +191,6 @@ void ThreadPool::activate_worker(std::size_t worker_id) {
 
     update_grid(old->get_start_row(worker_id), old->get_end_rows(worker_id), *old, *next);
 
-    lock.lock();
     if (finished_workers_.fetch_add(1, std::memory_order_relaxed) + 1 == active_workers_)
       done_cv_.notify_one();
   }
