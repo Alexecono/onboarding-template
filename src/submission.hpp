@@ -104,8 +104,6 @@ class ThreadPool {
     void activate_worker(std::size_t worker_id);
     void start_iteration(const Grid& old_grid, Grid& new_grid);
     void wait_for_workers();
-
-
 };
 
 std::size_t get_active_threads(std::size_t interior_rows) {
@@ -177,14 +175,14 @@ void ThreadPool::activate_worker(std::size_t worker_id) {
 
     if (stop_)
         break;
-
-    my_iteration = iteration_.load(std::memory_order_acquire);
     
     lock.unlock();
 
     // This worker is not needed for this iteration.
     if (worker_id >= active_workers_)
       continue;
+
+    my_iteration = iteration_.load(std::memory_order_acquire);
 
     const Grid* old = old_grid_;
     Grid* next = new_grid_;
