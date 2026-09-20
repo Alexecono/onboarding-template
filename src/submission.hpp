@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <mutex>
 #include <condition_variable>
+#include <atomic>
 
 struct Worker_Intervals {
   std::size_t start_row;
@@ -83,6 +84,7 @@ class ThreadPool {
   private:
     std::vector<std::thread> workers_;
     std::size_t active_workers_ = 0;
+    std::size_t num_threads_ = 0;
 
     std::mutex mutex_;
     std::condition_variable wake_cv_;
@@ -90,9 +92,8 @@ class ThreadPool {
 
     bool stop_ = false;
 
-    std::size_t iteration_ = 0;
-    std::size_t finished_workers_ = 0;
-    std::size_t num_threads_ = 0;
+    std::atomic<std::size_t> iteration_{0};
+    std::atomic<std::size_t> finished_workers_{0};
 
     const Grid* old_grid_ = nullptr;
     Grid* new_grid_ = nullptr;
@@ -171,13 +172,15 @@ void ThreadPool::activate_worker(std::size_t worker_id) {
     //   but before going to sleep, apply_stencil might have started a new iteration,
     //   and then sleeps, missing an iteration.
     wake_cv_.wait(lock, [&] {
-      return iteration_ > my_iteration || stop_;
+      return iteration_.load(std::memory_order_acquire) > my_iteration || stop_;
     });
 
     if (stop_)
         break;
 
-    my_iteration = iteration_;
+    lock.unlock();
+
+    my_iteration = iteration_.load(std::memory_order_acquire);
 
     // This worker is not needed for this iteration.
     if (worker_id >= active_workers_)
@@ -186,26 +189,21 @@ void ThreadPool::activate_worker(std::size_t worker_id) {
     const Grid* old = old_grid_;
     Grid* next = new_grid_;
 
-    lock.unlock();
-
     update_grid(old->get_start_row(worker_id), old->get_end_rows(worker_id), *old, *next);
 
     lock.lock();
-    finished_workers_++;
-    if (finished_workers_ == active_workers_)
+    if (finished_workers_.fetch_add(1, std::memory_order_relaxed) + 1 == active_workers_)
       done_cv_.notify_one();
   }
 }
 
 void ThreadPool::start_iteration(const Grid& old_grid, Grid& new_grid) {
-  {
-    std::lock_guard<std::mutex> lock(mutex_);
     old_grid_ = &old_grid;
     new_grid_ = &new_grid;
-    finished_workers_ = 0;
     active_workers_ = old_grid.get_active_workers();
-    iteration_++;
-  } // Unlocks
+    
+    finished_workers_.store(0, std::memory_order_relaxed);
+    iteration_.fetch_add(1, std::memory_order_release);
 
   // Wake all persistent workers
   wake_cv_.notify_all();
@@ -215,7 +213,7 @@ void ThreadPool::wait_for_workers(){
   std::unique_lock<std::mutex> lock(mutex_);
 
   done_cv_.wait(lock, [&] {
-    return finished_workers_ == active_workers_;
+    return finished_workers_.load(std::memory_order_acquire) == active_workers_;
   });
 }
 
