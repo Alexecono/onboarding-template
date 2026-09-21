@@ -178,11 +178,11 @@ void ThreadPool::activate_worker(std::size_t worker_id) {
     
     lock.unlock();
 
+    my_iteration = iteration_.load(std::memory_order_acquire);
+
     // This worker is not needed for this iteration.
     if (worker_id >= active_workers_)
       continue;
-
-    my_iteration = iteration_.load(std::memory_order_acquire);
 
     const Grid* old = old_grid_;
     Grid* next = new_grid_;
@@ -195,12 +195,15 @@ void ThreadPool::activate_worker(std::size_t worker_id) {
 }
 
 void ThreadPool::start_iteration(const Grid& old_grid, Grid& new_grid) {
-    old_grid_ = &old_grid;
-    new_grid_ = &new_grid;
-    active_workers_ = old_grid.get_active_workers();
-    
-    finished_workers_.store(0, std::memory_order_relaxed);
-    iteration_.fetch_add(1, std::memory_order_release);
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      old_grid_ = &old_grid;
+      new_grid_ = &new_grid;
+      active_workers_ = old_grid.get_active_workers();
+      
+      finished_workers_.store(0, std::memory_order_relaxed);
+      iteration_.fetch_add(1, std::memory_order_release);
+    }
 
   // Wake all persistent workers
   wake_cv_.notify_all();
@@ -257,7 +260,6 @@ void apply_stencil(const Grid& old_grid, Grid& new_grid){
     thread_pool.start_iteration(old_grid, new_grid);
     thread_pool.wait_for_workers();
   } else {
-    //std::cout << "No threading" << std::endl;
     update_grid(1, old_grid.get_rows() - 1, old_grid, new_grid);
   }
 
